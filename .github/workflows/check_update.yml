@@ -2,9 +2,12 @@ name: Check Baozi Updates
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 * * * *"
 
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   check-update:
@@ -13,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,8 +28,19 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run checker
+      - name: Run Baozi checker
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           python main.py
+
+      - name: Save updated state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add state.json
+
+          git diff --cached --quiet || git commit -m "Update chapter state"
+
+          git push
