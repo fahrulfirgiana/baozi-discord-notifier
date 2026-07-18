@@ -18,14 +18,16 @@ STATE_FILE = "state.json"
 
 
 # =========================================================
-# KONFIGURASI KHUSUS INFINITE EVOLUTION
+# KONFIGURASI INFINITE EVOLUTION
 # =========================================================
 
 INFINITE_EVOLUTION_NAME = (
     "Infinite Evolution Starting from Zero"
 )
 
-# Berdasarkan data yang kamu berikan:
+# PATOKAN CHAPTER
+#
+# Berdasarkan scans kamu:
 #
 # data-index 133 = Chapter 109
 #
@@ -106,7 +108,7 @@ def save_state(state):
 # =========================================================
 # MENGAMBIL NOMOR CHAPTER DARI JUDUL
 #
-# Digunakan untuk Urban Dragon Reveal
+# Digunakan untuk Urban Dragon Reveal.
 #
 # Contoh:
 #
@@ -324,11 +326,11 @@ def get_chapters(url):
         # =================================================
         # MENGAMBIL NOMOR CHAPTER
         #
-        # Untuk Urban Dragon:
-        # nomor diambil dari judul.
+        # Urban Dragon:
+        # nomor dibaca dari judul.
         #
-        # Untuk Infinite Evolution:
-        # nomor akan dihitung khusus nanti.
+        # Infinite Evolution:
+        # nomor dihitung khusus nanti.
         # =================================================
 
         chapter_number = (
@@ -398,7 +400,7 @@ def get_latest_chapter(
     #
     # Gunakan data-index terbesar.
     #
-    # Nomor chapter dihitung dari:
+    # Nomor chapter dihitung berdasarkan patokan:
     #
     # Index 133 = Chapter 109
     # =====================================================
@@ -433,8 +435,8 @@ def get_latest_chapter(
     # =====================================================
     # KOMIK LAIN
     #
-    # Urban Dragon tetap menggunakan
-    # nomor chapter dari judul.
+    # Urban Dragon menggunakan nomor
+    # yang diambil dari judul.
     # =====================================================
 
     numbered_chapters = [
@@ -498,7 +500,7 @@ def get_chapter_id(
     # =====================================================
     # KHUSUS INFINITE EVOLUTION
     #
-    # Gunakan data-index sebagai identitas.
+    # Gunakan data-index.
     #
     # Contoh:
     #
@@ -519,11 +521,7 @@ def get_chapter_id(
     # =====================================================
     # KOMIK LAIN
     #
-    # Gunakan nomor chapter.
-    #
-    # Contoh:
-    #
-    # Chapter 82 -> number:82
+    # Gunakan nomor chapter jika tersedia.
     # =====================================================
 
     if chapter[
@@ -548,6 +546,48 @@ def get_chapter_id(
         f"{chapter['data_index']}"
 
     )
+
+
+# =========================================================
+# MEMBUAT DATA STATE
+# =========================================================
+
+def create_state_data(
+    chapter,
+    chapter_id
+):
+
+    return {
+
+        "data_index":
+
+            chapter[
+                "data_index"
+            ],
+
+        "number":
+
+            chapter[
+                "number"
+            ],
+
+        "title":
+
+            chapter[
+                "title"
+            ],
+
+        "url":
+
+            chapter.get(
+                "url"
+            ),
+
+        "chapter_id":
+
+            chapter_id
+
+    }
 
 
 # =========================================================
@@ -601,6 +641,38 @@ def send_discord(
 
 
     # =====================================================
+    # MENGAMBIL URL CHAPTER
+    # =====================================================
+
+    chapter_url = chapter.get(
+        "url"
+    )
+
+
+    # =====================================================
+    # MEMBUAT LINK BACA
+    # =====================================================
+
+    if chapter_url:
+
+        read_link = (
+
+            f"[🔗 Baca "
+            f"{chapter_display}]"
+            f"({chapter_url})"
+
+        )
+
+    else:
+
+        read_link = (
+
+            "🔗 URL chapter tidak ditemukan"
+
+        )
+
+
+    # =====================================================
     # MEMBUAT PESAN DISCORD
     # =====================================================
 
@@ -627,13 +699,21 @@ def send_discord(
                     f"**{chapter_display}**\n\n"
 
                     f"📝 "
-                    f"{chapter['title']}"
+                    f"{chapter['title']}\n\n"
+
+                    f"{read_link}"
 
                 ),
 
+                # Jika URL chapter tersedia,
+                # klik judul embed akan membuka
+                # chapter langsung.
+
                 "url":
 
-                    comic_url,
+                    chapter_url
+                    if chapter_url
+                    else comic_url,
 
                 "color":
 
@@ -788,6 +868,14 @@ def main():
             )
 
 
+            print(
+
+                f"  URL: "
+                f"{latest['url']}"
+
+            )
+
+
             # =================================================
             # AMBIL STATE KOMIK
             # =================================================
@@ -828,31 +916,13 @@ def main():
 
                 state[
                     comic_name
-                ] = {
+                ] = create_state_data(
 
-                    "data_index":
+                    latest,
 
-                        latest[
-                            "data_index"
-                        ],
+                    latest_id
 
-                    "number":
-
-                        latest[
-                            "number"
-                        ],
-
-                    "title":
-
-                        latest[
-                            "title"
-                        ],
-
-                    "chapter_id":
-
-                        latest_id
-
-                }
+                )
 
 
                 state_changed = True
@@ -866,7 +936,7 @@ def main():
 
 
                 # Tidak mengirim notif
-                # saat pertama kali dipantau
+                # saat pertama kali dipantau.
 
                 continue
 
@@ -899,7 +969,7 @@ def main():
 
 
             # =================================================
-            # CEK APAKAH ADA UPDATE
+            # TIDAK ADA CHAPTER BARU
             # =================================================
 
             if latest_id == last_id:
@@ -912,74 +982,31 @@ def main():
 
 
                 # =================================================
-                # PERBAIKI DATA NOMOR CHAPTER
+                # PERBAIKI / SINKRONKAN STATE
                 #
-                # Ini berguna untuk state lama
-                # Infinite Evolution yang sebelumnya
-                # memiliki:
+                # Berguna untuk state lama seperti:
                 #
                 # "number": null
                 #
-                # Sekarang akan diperbaiki menjadi:
+                # dan belum memiliki URL.
                 #
-                # "number": 109
-                #
-                # tanpa mengirim notifikasi.
+                # Tidak mengirim notif.
                 # =================================================
 
-                if (
+                new_state_data = create_state_data(
 
-                    comic_state.get(
-                        "number"
-                    )
+                    latest,
 
-                    !=
+                    latest_id
 
-                    latest.get(
-                        "number"
-                    )
+                )
 
-                    or
 
-                    comic_state.get(
-                        "title"
-                    )
-
-                    !=
-
-                    latest.get(
-                        "title"
-                    )
-
-                ):
+                if comic_state != new_state_data:
 
                     state[
                         comic_name
-                    ] = {
-
-                        "data_index":
-
-                            latest[
-                                "data_index"
-                            ],
-
-                        "number":
-
-                            latest[
-                                "number"
-                            ],
-
-                        "title":
-
-                            latest[
-                                "title"
-                            ],
-
-                        "chapter_id":
-
-                            latest_id
-
-                    }
+                    ] = new_state_data
 
 
                     state_changed = True
@@ -1036,31 +1063,13 @@ def main():
 
             state[
                 comic_name
-            ] = {
+            ] = create_state_data(
 
-                "data_index":
+                latest,
 
-                    latest[
-                        "data_index"
-                    ],
+                latest_id
 
-                "number":
-
-                    latest[
-                        "number"
-                    ],
-
-                "title":
-
-                    latest[
-                        "title"
-                    ],
-
-                "chapter_id":
-
-                    latest_id
-
-            }
+            )
 
 
             state_changed = True
