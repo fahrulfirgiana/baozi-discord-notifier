@@ -1,14 +1,20 @@
 {
   "Infinite Evolution Starting from Zero": {
-    "data_index": 132,
+    "data_index": 133,
     "number": null,
     "title": "跟我走吧",
-    "chapter_id": "index:132"
+    "chapter_id": "index:133"
   },
   "Urban Dragon Reval": {
     "data_index": 2,
     "number": 81,
     "title": "第82話 彗星撞地球！",
     "chapter_id": "number:81"
+  },
+  "Urban Dragon Reveal": {
+    "data_index": 2,
+    "number": 82,
+    "title": "第82話 彗星撞地球！",
+    "chapter_id": "number:82"
   }
 }
