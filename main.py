@@ -16,15 +16,37 @@ DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 COMICS_FILE = "comics.json"
 STATE_FILE = "state.json"
 
+
 # =========================================================
 # KONFIGURASI KHUSUS INFINITE EVOLUTION
 # =========================================================
 
-INFINITE_EVOLUTION_NAME = "Infinite Evolution Starting From Zero"
+INFINITE_EVOLUTION_NAME = (
+    "Infinite Evolution Starting from Zero"
+)
 
-INFINITE_EVOLUTION_REFERENCE_TITLE = "就好這口"
+# Berdasarkan data yang kamu berikan:
+#
+# data-index 133 = Chapter 109
+#
+# Maka:
+#
+# data-index 134 = Chapter 110
+# data-index 135 = Chapter 111
+# data-index 136 = Chapter 112
+#
+# dan seterusnya.
 
-INFINITE_EVOLUTION_REFERENCE_CHAPTER = 107
+INFINITE_EVOLUTION_REFERENCE_INDEX = 133
+
+INFINITE_EVOLUTION_REFERENCE_CHAPTER = 109
+
+
+# =========================================================
+# DISCORD USER ID
+# =========================================================
+
+DISCORD_USER_ID = "892775710408732702"
 
 
 # =========================================================
@@ -83,7 +105,17 @@ def save_state(state):
 
 # =========================================================
 # MENGAMBIL NOMOR CHAPTER DARI JUDUL
-# KHUSUS KOMIK YANG MENULIS NOMOR DI JUDUL
+#
+# Digunakan untuk Urban Dragon Reveal
+#
+# Contoh:
+#
+# 第74話 吳法現身？！  -> 74
+# 第82話 彗星撞地球！  -> 82
+#
+# Chapter 74              -> 74
+# Episode 74              -> 74
+# Bab 74                  -> 74
 # =========================================================
 
 def extract_chapter_number(title):
@@ -92,6 +124,7 @@ def extract_chapter_number(title):
 
         # Contoh:
         # 第74話 吳法現身？！
+        # 第82話 彗星撞地球！
         r"第\s*(\d+)\s*[話话章]",
 
         # Contoh:
@@ -107,6 +140,7 @@ def extract_chapter_number(title):
         r"(?:Bab|BAB)\s*(\d+)",
 
     ]
+
 
     for pattern in patterns:
 
@@ -129,59 +163,26 @@ def extract_chapter_number(title):
 # =========================================================
 # MENGHITUNG NOMOR CHAPTER INFINITE EVOLUTION
 #
-# 就好這口 = Chapter 107
+# PATOKAN:
 #
-# Chapter setelahnya:
-# 就好這口        = 107
-# Chapter berikut = 108
-# Chapter berikut = 109
+# data-index 133 = Chapter 109
+#
+# RUMUS:
+#
+# Nomor chapter =
+# 109 + (data-index sekarang - 133)
+#
+# Contoh:
+#
+# Index 133 -> 109
+# Index 134 -> 110
+# Index 135 -> 111
+# Index 136 -> 112
 # =========================================================
 
 def get_infinite_evolution_chapter_number(
-    chapters,
     current_chapter
 ):
-
-    reference_chapter = None
-
-
-    # =====================================================
-    # CARI CHAPTER PATOKAN
-    # =====================================================
-
-    for chapter in chapters:
-
-        if (
-            INFINITE_EVOLUTION_REFERENCE_TITLE
-            in chapter["title"]
-        ):
-
-            reference_chapter = chapter
-
-            break
-
-
-    # =====================================================
-    # PATOKAN TIDAK DITEMUKAN
-    # =====================================================
-
-    if reference_chapter is None:
-
-        raise Exception(
-
-            "Chapter patokan "
-            f"'{INFINITE_EVOLUTION_REFERENCE_TITLE}' "
-            "tidak ditemukan. "
-            "Tidak dapat menentukan nomor chapter "
-            "Infinite Evolution."
-
-        )
-
-
-    # =====================================================
-    # HITUNG NOMOR CHAPTER
-    # BERDASARKAN DATA-INDEX
-    # =====================================================
 
     chapter_difference = (
 
@@ -191,9 +192,7 @@ def get_infinite_evolution_chapter_number(
 
         -
 
-        reference_chapter[
-            "data_index"
-        ]
+        INFINITE_EVOLUTION_REFERENCE_INDEX
 
     )
 
@@ -291,9 +290,7 @@ def get_chapters(url):
         # =================================================
 
         data_index = item.get(
-
             "data-index"
-
         )
 
 
@@ -302,9 +299,7 @@ def get_chapters(url):
             try:
 
                 data_index = int(
-
                     data_index
-
                 )
 
             except ValueError:
@@ -321,11 +316,8 @@ def get_chapters(url):
         # =================================================
 
         title = item.get_text(
-
             " ",
-
             strip=True
-
         )
 
 
@@ -333,20 +325,16 @@ def get_chapters(url):
         # MENGAMBIL NOMOR CHAPTER
         #
         # Untuk Urban Dragon:
-        # ambil nomor dari judul
+        # nomor diambil dari judul.
         #
         # Untuk Infinite Evolution:
-        # dihitung nanti berdasarkan patokan
+        # nomor akan dihitung khusus nanti.
         # =================================================
 
         chapter_number = (
-
             extract_chapter_number(
-
                 title
-
             )
-
         )
 
 
@@ -355,20 +343,15 @@ def get_chapters(url):
         # =================================================
 
         chapter_url = item.get(
-
             "href"
-
         )
 
 
         if chapter_url:
 
             chapter_url = urljoin(
-
                 url,
-
                 chapter_url
-
             )
 
 
@@ -415,8 +398,9 @@ def get_latest_chapter(
     #
     # Gunakan data-index terbesar.
     #
-    # Nomor chapter akan dihitung berdasarkan
-    # 就好這口 = Chapter 107
+    # Nomor chapter dihitung dari:
+    #
+    # Index 133 = Chapter 109
     # =====================================================
 
     if comic_name == INFINITE_EVOLUTION_NAME:
@@ -426,7 +410,6 @@ def get_latest_chapter(
             chapters,
 
             key=lambda chapter:
-
                 chapter[
                     "data_index"
                 ]
@@ -434,11 +417,10 @@ def get_latest_chapter(
         )
 
 
+        # Hitung nomor chapter
         latest[
             "number"
         ] = get_infinite_evolution_chapter_number(
-
-            chapters,
 
             latest
 
@@ -449,9 +431,10 @@ def get_latest_chapter(
 
 
     # =====================================================
-    # KOMIK LAIN / URBAN DRAGON
+    # KOMIK LAIN
     #
-    # Tetap menggunakan sistem sebelumnya
+    # Urban Dragon tetap menggunakan
+    # nomor chapter dari judul.
     # =====================================================
 
     numbered_chapters = [
@@ -467,6 +450,10 @@ def get_latest_chapter(
     ]
 
 
+    # =====================================================
+    # JIKA ADA NOMOR CHAPTER
+    # =====================================================
+
     if numbered_chapters:
 
         return max(
@@ -474,7 +461,6 @@ def get_latest_chapter(
             numbered_chapters,
 
             key=lambda chapter:
-
                 chapter[
                     "number"
                 ]
@@ -482,18 +468,84 @@ def get_latest_chapter(
         )
 
 
-    # Jika tidak ada nomor,
-    # gunakan data-index terbesar
+    # =====================================================
+    # JIKA TIDAK ADA NOMOR
+    #
+    # Gunakan data-index terbesar.
+    # =====================================================
 
     return max(
 
         chapters,
 
         key=lambda chapter:
-
             chapter[
                 "data_index"
             ]
+
+    )
+
+
+# =========================================================
+# MEMBUAT IDENTITAS CHAPTER
+# =========================================================
+
+def get_chapter_id(
+    chapter,
+    comic_name
+):
+
+    # =====================================================
+    # KHUSUS INFINITE EVOLUTION
+    #
+    # Gunakan data-index sebagai identitas.
+    #
+    # Contoh:
+    #
+    # Index 133 -> index:133
+    # Index 134 -> index:134
+    # =====================================================
+
+    if comic_name == INFINITE_EVOLUTION_NAME:
+
+        return (
+
+            f"index:"
+            f"{chapter['data_index']}"
+
+        )
+
+
+    # =====================================================
+    # KOMIK LAIN
+    #
+    # Gunakan nomor chapter.
+    #
+    # Contoh:
+    #
+    # Chapter 82 -> number:82
+    # =====================================================
+
+    if chapter[
+        "number"
+    ] is not None:
+
+        return (
+
+            f"number:"
+            f"{chapter['number']}"
+
+        )
+
+
+    # =====================================================
+    # FALLBACK
+    # =====================================================
+
+    return (
+
+        f"index:"
+        f"{chapter['data_index']}"
 
     )
 
@@ -541,25 +593,30 @@ def send_discord(
 
             f"(Index "
 
-            f"{chapter['data_index']})"
+            f"{chapter['data_index']}"
+
+            f")"
 
         )
 
 
     # =====================================================
-    # PESAN DISCORD
+    # MEMBUAT PESAN DISCORD
     # =====================================================
 
     message = {
 
+        # Mention akun Discord
         "content":
-            "<@892775710408732702>",
+
+            f"<@{DISCORD_USER_ID}>",
 
         "embeds": [
 
             {
 
                 "title":
+
                     "🔔 Komik Update!",
 
                 "description": (
@@ -575,9 +632,11 @@ def send_discord(
                 ),
 
                 "url":
+
                     comic_url,
 
                 "color":
+
                     5814783
 
             }
@@ -586,6 +645,10 @@ def send_discord(
 
     }
 
+
+    # =====================================================
+    # KIRIM REQUEST KE DISCORD
+    # =====================================================
 
     response = requests.post(
 
@@ -599,66 +662,6 @@ def send_discord(
 
 
     response.raise_for_status()
-
-
-# =========================================================
-# MEMBUAT IDENTITAS CHAPTER
-# =========================================================
-
-def get_chapter_id(
-    chapter,
-    comic_name
-):
-
-    # =====================================================
-    # KHUSUS INFINITE EVOLUTION
-    #
-    # Gunakan data-index sebagai ID.
-    #
-    # Karena nomor chapter dihitung dari patokan.
-    # =====================================================
-
-    if comic_name == INFINITE_EVOLUTION_NAME:
-
-        return (
-
-            f"index:"
-
-            f"{chapter['data_index']}"
-
-        )
-
-
-    # =====================================================
-    # URBAN DRAGON
-    #
-    # Tetap menggunakan nomor chapter
-    # =====================================================
-
-    if chapter[
-        "number"
-    ] is not None:
-
-        return (
-
-            f"number:"
-
-            f"{chapter['number']}"
-
-        )
-
-
-    # =====================================================
-    # FALLBACK
-    # =====================================================
-
-    return (
-
-        f"index:"
-
-        f"{chapter['data_index']}"
-
-    )
 
 
 # =========================================================
@@ -699,7 +702,6 @@ def main():
         print(
 
             f"Mengecek: "
-
             f"{comic_name}"
 
         )
@@ -721,7 +723,6 @@ def main():
             print(
 
                 f"Total chapter ditemukan: "
-
                 f"{len(chapters)}"
 
             )
@@ -753,7 +754,7 @@ def main():
 
 
             # =================================================
-            # TAMPILKAN INFO CHAPTER
+            # TAMPILKAN CHAPTER TERBARU
             # =================================================
 
             print(
@@ -766,7 +767,6 @@ def main():
             print(
 
                 f"  Index: "
-
                 f"{latest['data_index']}"
 
             )
@@ -775,7 +775,6 @@ def main():
             print(
 
                 f"  Nomor: "
-
                 f"{latest['number']}"
 
             )
@@ -784,7 +783,6 @@ def main():
             print(
 
                 f"  Judul: "
-
                 f"{latest['title']}"
 
             )
@@ -795,6 +793,19 @@ def main():
             # =================================================
 
             comic_state = state.get(
+
+                comic_name
+
+            )
+
+
+            # =================================================
+            # BUAT ID CHAPTER TERBARU
+            # =================================================
+
+            latest_id = get_chapter_id(
+
+                latest,
 
                 comic_name
 
@@ -814,10 +825,6 @@ def main():
 
                 )
 
-
-                # =================================================
-                # SIMPAN DATA CHAPTER TERBARU
-                # =================================================
 
                 state[
                     comic_name
@@ -843,13 +850,7 @@ def main():
 
                     "chapter_id":
 
-                        get_chapter_id(
-
-                            latest,
-
-                            comic_name
-
-                        )
+                        latest_id
 
                 }
 
@@ -864,26 +865,15 @@ def main():
                 )
 
 
-                # =================================================
-                # TIDAK MENGIRIM NOTIF
-                # SAAT PERTAMA KALI
-                # =================================================
+                # Tidak mengirim notif
+                # saat pertama kali dipantau
 
                 continue
 
 
             # =================================================
-            # CEK IDENTITAS CHAPTER
+            # AMBIL ID CHAPTER TERAKHIR
             # =================================================
-
-            latest_id = get_chapter_id(
-
-                latest,
-
-                comic_name
-
-            )
-
 
             last_id = comic_state.get(
 
@@ -895,7 +885,6 @@ def main():
             print(
 
                 f"Chapter ID terakhir: "
-
                 f"{last_id}"
 
             )
@@ -904,14 +893,13 @@ def main():
             print(
 
                 f"Chapter ID terbaru: "
-
                 f"{latest_id}"
 
             )
 
 
             # =================================================
-            # TIDAK ADA UPDATE
+            # CEK APAKAH ADA UPDATE
             # =================================================
 
             if latest_id == last_id:
@@ -921,6 +909,89 @@ def main():
                     "Tidak ada chapter baru."
 
                 )
+
+
+                # =================================================
+                # PERBAIKI DATA NOMOR CHAPTER
+                #
+                # Ini berguna untuk state lama
+                # Infinite Evolution yang sebelumnya
+                # memiliki:
+                #
+                # "number": null
+                #
+                # Sekarang akan diperbaiki menjadi:
+                #
+                # "number": 109
+                #
+                # tanpa mengirim notifikasi.
+                # =================================================
+
+                if (
+
+                    comic_state.get(
+                        "number"
+                    )
+
+                    !=
+
+                    latest.get(
+                        "number"
+                    )
+
+                    or
+
+                    comic_state.get(
+                        "title"
+                    )
+
+                    !=
+
+                    latest.get(
+                        "title"
+                    )
+
+                ):
+
+                    state[
+                        comic_name
+                    ] = {
+
+                        "data_index":
+
+                            latest[
+                                "data_index"
+                            ],
+
+                        "number":
+
+                            latest[
+                                "number"
+                            ],
+
+                        "title":
+
+                            latest[
+                                "title"
+                            ],
+
+                        "chapter_id":
+
+                            latest_id
+
+                    }
+
+
+                    state_changed = True
+
+
+                    print(
+
+                        "Data state berhasil "
+                        "disinkronkan."
+
+                    )
+
 
                 continue
 
@@ -937,7 +1008,7 @@ def main():
 
 
             # =================================================
-            # KIRIM NOTIFIKASI
+            # KIRIM NOTIFIKASI DISCORD
             # =================================================
 
             send_discord(
@@ -953,7 +1024,8 @@ def main():
 
             print(
 
-                "Notifikasi Discord berhasil dikirim."
+                "Notifikasi Discord "
+                "berhasil dikirim."
 
             )
 
@@ -1006,9 +1078,7 @@ def main():
             print(
 
                 f"❌ Gagal mengecek "
-
                 f"{comic_name}: "
-
                 f"{error}"
 
             )
