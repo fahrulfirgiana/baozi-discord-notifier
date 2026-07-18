@@ -329,7 +329,7 @@ def send_discord(
 
 
     message = {
-        "content": "<@123456789012345678>",
+        "content": "<@892775710408732702>",
         "embeds": [
 
             {
