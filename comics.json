@@ -10,5 +10,10 @@
     "name": "Urban Dragon Reveal",
     "url": "https://www.baozimh.com/comic/dushiyinlong-qimaozhongwenwang",
     "type": "number_from_title"
+  },
+  {
+    "name": "Steel Covenant",
+    "url": "https://www.baozimh.com/comic/xingjiahunjiangchuan-lexiangdongman",
+    "type": "number_from_title"
   }
 ]
