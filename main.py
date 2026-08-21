@@ -220,17 +220,20 @@ def get_infinite_evolution_chapter_number(
 def get_chapters(url):
 
     headers = {
-
         "User-Agent": (
-
             "Mozilla/5.0 "
             "(Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 "
             "(KHTML, like Gecko) "
             "Chrome/120.0 Safari/537.36"
-
-        )
-
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,"
+            "application/xml;q=0.9,image/avif,image/webp,"
+            "*/*;q=0.8"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://baozimh.org/"
     }
 
     response = requests.get(
@@ -247,10 +250,167 @@ def get_chapters(url):
     )
 
     # =====================================================
-    # BAOZIMH.COM
+    # BAOZIMH.ORG
     #
-    # Struktur lama:
-    # a.comics-chapters__item
+    # PENTING:
+    #
+    # Baozi.org menampilkan daftar chapter melalui
+    # Alpine.js:
+    #
+    #   <div id="mangachapters"
+    #        x-data="mangaChapters"
+    #        x-init="init">
+    #
+    #   <div id="sortchapters"
+    #        x-html="sortedChapters">
+    #
+    # Pada HTML mentah yang diterima requests/GitHub
+    # Actions, isi x-html tidak selalu tersedia sebagai
+    # DOM chapter yang bisa ditemukan BeautifulSoup.
+    #
+    # Tetapi link chapter terbaru tetap tersedia secara
+    # statis:
+    #
+    #   <a id="lastchap"
+    #      href="/manga/dushiyinlong/..."
+    #      class="italic">
+    #      第96话 精神病院！
+    #   </a>
+    #
+    # Karena bot hanya membutuhkan chapter terbaru,
+    # gunakan #lastchap sebagai fallback utama.
+    # =====================================================
+
+    if "baozimh.org" in url:
+
+        # ---------------------------------------------
+        # METODE 1: LINK CHAPTER TERBARU
+        # ---------------------------------------------
+
+        latest = soup.select_one(
+            "#lastchap"
+        )
+
+        if latest:
+
+            title = (
+                latest.get("data-ct")
+                or latest.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            chapter_url = latest.get(
+                "href"
+            )
+
+            chapter_number = (
+                extract_chapter_number(
+                    title
+                )
+            )
+
+            if chapter_url and chapter_number is not None:
+
+                chapter_url = urljoin(
+                    url,
+                    chapter_url
+                )
+
+                return [{
+                    "data_index": 0,
+                    "number": chapter_number,
+                    "title": title,
+                    "url": chapter_url
+                }]
+
+        # ---------------------------------------------
+        # METODE 2: DAFTAR CHAPTER STATIS
+        #
+        # Jika suatu saat Baozi.org mengirim daftar
+        # chapter langsung di HTML, gunakan daftar itu.
+        # ---------------------------------------------
+
+        chapter_items = soup.select(
+            "#mangachapters .chapteritem > a"
+        )
+
+        if not chapter_items:
+
+            chapter_items = soup.select(
+                ".chapteritem > a"
+            )
+
+        if chapter_items:
+
+            chapters = []
+
+            for position, item in enumerate(
+                chapter_items
+            ):
+
+                parent = item.find_parent(
+                    class_="chapteritem"
+                )
+
+                data_index = (
+                    parent.get("data-index")
+                    if parent
+                    else item.get("data-index")
+                )
+
+                try:
+                    data_index = int(
+                        data_index
+                    )
+                except (
+                    ValueError,
+                    TypeError
+                ):
+                    data_index = position
+
+                title = (
+                    item.get("data-ct")
+                    or item.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                chapter_number = (
+                    extract_chapter_number(
+                        title
+                    )
+                )
+
+                chapter_url = item.get(
+                    "href"
+                )
+
+                if chapter_url:
+
+                    chapter_url = urljoin(
+                        url,
+                        chapter_url
+                    )
+
+                chapters.append({
+                    "data_index": data_index,
+                    "number": chapter_number,
+                    "title": title,
+                    "url": chapter_url
+                })
+
+            return chapters
+
+        raise Exception(
+            "Baozi.org tidak mengirim #lastchap "
+            "atau daftar .chapteritem pada HTML."
+        )
+
+    # =====================================================
+    # BAOZIMH.COM
     # =====================================================
 
     if "baozimh.com" in url:
@@ -259,37 +419,14 @@ def get_chapters(url):
             "a.comics-chapters__item"
         )
 
-    # =====================================================
-    # BAOZIMH.ORG
-    #
-    # Struktur baru:
-    #
-    # <div class="chapteritem" data-index="0">
-    #   <a href="..." data-ms="..." data-cs="..."
-    #      data-ct="第96话 ...">
-    # =====================================================
-
-    elif "baozimh.org" in url:
-
-        chapter_items = soup.select(
-            "#mangachapters .chapteritem > a"
-        )
-
-        # Fallback jika struktur ID berubah
-        if not chapter_items:
-            chapter_items = soup.select(
-                ".chapteritem > a"
-            )
-
     else:
 
-        # Coba struktur .com terlebih dahulu,
-        # lalu struktur .org.
         chapter_items = soup.select(
             "a.comics-chapters__item"
         )
 
         if not chapter_items:
+
             chapter_items = soup.select(
                 "#mangachapters .chapteritem > a"
             )
@@ -298,23 +435,15 @@ def get_chapters(url):
 
         raise Exception(
             "Tidak menemukan chapter. "
-            "Selector Baozi.com maupun Baozi.org "
-            "tidak cocok dengan halaman."
+            "Selector Baozi.com tidak cocok "
+            "dengan halaman."
         )
 
     chapters = []
 
-    for position, item in enumerate(chapter_items):
-
-        # =================================================
-        # DATA-INDEX
-        #
-        # Baozi.com:
-        # biasanya berada langsung pada <a>
-        #
-        # Baozi.org:
-        # berada pada parent .chapteritem
-        # =================================================
+    for position, item in enumerate(
+        chapter_items
+    ):
 
         data_index = item.get(
             "data-index"
@@ -327,71 +456,37 @@ def get_chapters(url):
             )
 
             if parent:
+
                 data_index = parent.get(
                     "data-index"
                 )
 
-        if data_index is not None:
+        try:
 
-            try:
+            data_index = int(
+                data_index
+            )
 
-                data_index = int(
-                    data_index
-                )
-
-            except (ValueError, TypeError):
-
-                data_index = position
-
-        else:
+        except (
+            ValueError,
+            TypeError
+        ):
 
             data_index = position
 
-        # =================================================
-        # JUDUL CHAPTER
-        #
-        # Baozi.org menyediakan data-ct:
-        # 第96话 精神病院！
-        #
-        # Lebih aman daripada hanya mengambil
-        # text node dari seluruh elemen.
-        # =================================================
-
-        title = item.get(
-            "data-ct"
-        )
-
-        if not title:
-
-            title_element = item.select_one(
-                ".chaptertitle"
+        title = (
+            item.get("data-ct")
+            or item.get_text(
+                " ",
+                strip=True
             )
-
-            if title_element:
-
-                title = title_element.get_text(
-                    " ",
-                    strip=True
-                )
-
-            else:
-
-                title = item.get_text(
-                    " ",
-                    strip=True
-                )
-
-        # =================================================
-        # NOMOR CHAPTER
-        # =================================================
-
-        chapter_number = extract_chapter_number(
-            title
         )
 
-        # =================================================
-        # URL CHAPTER
-        # =================================================
+        chapter_number = (
+            extract_chapter_number(
+                title
+            )
+        )
 
         chapter_url = item.get(
             "href"
@@ -404,24 +499,11 @@ def get_chapters(url):
                 chapter_url
             )
 
-        # =================================================
-        # SIMPAN DATA
-        # =================================================
-
         chapters.append({
-
-            "data_index":
-                data_index,
-
-            "number":
-                chapter_number,
-
-            "title":
-                title,
-
-            "url":
-                chapter_url
-
+            "data_index": data_index,
+            "number": chapter_number,
+            "title": title,
+            "url": chapter_url
         })
 
     return chapters
