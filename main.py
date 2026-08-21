@@ -268,19 +268,54 @@ def fetch_html_static(url):
 # server-side render.
 # =========================================================
 
-async def fetch_html_js_async(url, wait_ms=2000):
+async def fetch_html_js_async(url, wait_ms=3000):
 
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
-            headless=True
+
+            headless=True,
+
+            args=[
+
+                # Banyak situs mengecek flag ini untuk
+                # mendeteksi browser yang dikendalikan
+                # otomatisasi (Playwright/Selenium/dll).
+                "--disable-blink-features=AutomationControlled",
+
+            ]
+
         )
 
         try:
 
-            page = await browser.new_page(
-                user_agent=USER_AGENT
+            context = await browser.new_context(
+
+                user_agent=USER_AGENT,
+
+                viewport={
+
+                    "width": 1366,
+
+                    "height": 900
+
+                },
+
+                locale="zh-TW"
+
             )
+
+            # Sembunyikan navigator.webdriver, penanda paling
+            # umum dipakai situs untuk mendeteksi headless
+            # browser otomatis.
+            await context.add_init_script(
+
+                "Object.defineProperty(navigator, "
+                "'webdriver', {get: () => undefined});"
+
+            )
+
+            page = await context.new_page()
 
             await page.goto(
 
@@ -288,12 +323,33 @@ async def fetch_html_js_async(url, wait_ms=2000):
 
                 timeout=30000,
 
-                wait_until="networkidle"
+                # domcontentloaded lebih aman daripada
+                # networkidle -- beberapa situs punya koneksi
+                # latar belakang (analytics/ads) yang membuat
+                # networkidle tidak pernah tercapai.
+                wait_until="domcontentloaded"
 
             )
 
-            # Beri waktu tambahan untuk chapter list
-            # selesai di-load lewat AJAX.
+            # Tunggu spesifik sampai chapter list muncul di DOM
+            try:
+
+                await page.wait_for_selector(
+
+                    "a.comics-chapters__item",
+
+                    timeout=15000
+
+                )
+
+            except Exception:
+
+                # Selector tidak muncul dalam waktu tunggu --
+                # lanjut saja, biar tetap diambil HTML apa
+                # adanya untuk keperluan debug.
+                pass
+
+            # Beri waktu tambahan jaga-jaga untuk AJAX susulan.
             await page.wait_for_timeout(wait_ms)
 
             html = await page.content()
@@ -319,6 +375,16 @@ def fetch_html_js(url, wait_ms=2000):
 
 # =========================================================
 # PARSING HTML -> DAFTAR CHAPTER
+#
+# Situs "baozi" ternyata punya 2 platform/struktur HTML yang
+# beda total tergantung domain:
+#
+# 1. www.baozimh.com (Vue) -> <a class="comics-chapters__item">
+# 2. baozimh.org (Astro + Alpine.js) -> <div class="chapteritem">
+#    dengan data-ct = judul chapter, atau fallback ke elemen
+#    #lastchap (chapter terbaru saja, tersedia tanpa JS).
+#
+# Dicoba berurutan; yang pertama ketemu isinya dipakai.
 # =========================================================
 
 def parse_chapters(html, url):
@@ -330,6 +396,31 @@ def parse_chapters(html, url):
         "html.parser"
 
     )
+
+    chapters = parse_chapters_style_baozimh_com(soup, url)
+
+    if chapters:
+
+        return chapters
+
+    chapters = parse_chapters_style_baozimh_org(soup, url)
+
+    if chapters:
+
+        return chapters
+
+    return parse_latest_chapter_lastchap(soup, url)
+
+
+# =========================================================
+# STRUKTUR 1: www.baozimh.com (Vue)
+#
+# <a class="comics-chapters__item" data-index="..." href="...">
+#   judul chapter
+# </a>
+# =========================================================
+
+def parse_chapters_style_baozimh_com(soup, url):
 
     chapter_items = soup.select(
 
@@ -439,6 +530,221 @@ def parse_chapters(html, url):
 
 
 # =========================================================
+# STRUKTUR 2: baozimh.org (Astro + Alpine.js)
+#
+# <div class="chapteritem" data-index="...">
+#   <a href="..." data-ct="judul chapter">...</a>
+# </div>
+#
+# Judul chapter langsung tersedia di atribut data-ct, jadi
+# tidak perlu ambil dari teks elemen.
+#
+# Catatan: bagian ini biasanya baru terisi setelah Alpine.js
+# jalan (mode JavaScript/Playwright), karena di-render lewat
+# x-html.
+# =========================================================
+
+def parse_chapters_style_baozimh_org(soup, url):
+
+    items = soup.select(
+
+        "div.chapteritem"
+
+    )
+
+    chapters = []
+
+    seen_urls = set()
+
+    for position, div in enumerate(
+        items
+    ):
+
+        link = div.find("a")
+
+        if link is None:
+
+            continue
+
+        href = link.get("href")
+
+        if not href:
+
+            continue
+
+        chapter_url = urljoin(
+            url,
+            href
+        )
+
+        # Hindari duplikat -- situs ini menampilkan 2 daftar
+        # terpisah (terbaru & terlama) yang bisa saja
+        # tumpang tindih.
+        if chapter_url in seen_urls:
+
+            continue
+
+        seen_urls.add(chapter_url)
+
+        data_index = div.get("data-index")
+
+        try:
+
+            data_index = int(data_index)
+
+        except (TypeError, ValueError):
+
+            data_index = position
+
+        title = (
+
+            link.get("data-ct")
+            or link.get_text(" ", strip=True)
+
+        )
+
+        chapter_number = extract_chapter_number(title)
+
+        chapters.append({
+
+            "data_index": data_index,
+
+            "number": chapter_number,
+
+            "title": title,
+
+            "url": chapter_url
+
+        })
+
+    return chapters
+
+
+# =========================================================
+# STRUKTUR 3 (FALLBACK): elemen #lastchap
+#
+# <a id="lastchap" href="...">judul chapter terbaru</a>
+#
+# Cuma kasih 1 chapter (yang terbaru), tapi cukup untuk
+# keperluan notifikasi update. Elemen ini biasanya tersedia
+# di baozimh.org bahkan tanpa menjalankan JavaScript.
+# =========================================================
+
+def parse_latest_chapter_lastchap(soup, url):
+
+    tag = soup.find(id="lastchap")
+
+    if tag is None:
+
+        return []
+
+    href = tag.get("href")
+
+    if not href:
+
+        return []
+
+    chapter_url = urljoin(url, href)
+
+    title = tag.get_text(" ", strip=True)
+
+    chapter_number = extract_chapter_number(title)
+
+    return [{
+
+        "data_index": 0,
+
+        "number": chapter_number,
+
+        "title": title,
+
+        "url": chapter_url
+
+    }]
+
+
+# =========================================================
+# DEBUG: TELUSURI PENYEBAB SELECTOR TIDAK KETEMU
+#
+# Dipanggil hanya saat mode statis maupun JavaScript
+# sama-sama gagal menemukan chapter list. Tidak mengubah
+# behavior, cuma mencetak info tambahan ke log Actions
+# supaya penyebabnya bisa dipastikan (situs berubah struktur,
+# atau situsnya sendiri gagal load data / diblokir anti-bot).
+# =========================================================
+
+def debug_html_snapshot(html):
+
+    print("  --- DEBUG: info cuplikan HTML ---")
+
+    print(f"  Panjang HTML: {len(html)} karakter")
+
+    error_markers = [
+        "获取数据失败",
+        "获取数据失敗",
+        "Just a moment",
+        "Attention Required",
+        "captcha",
+    ]
+
+    found_markers = [
+        marker
+        for marker in error_markers
+        if marker.lower() in html.lower()
+    ]
+
+    if found_markers:
+
+        print(
+
+            "  Terdeteksi penanda gagal/anti-bot di HTML: "
+            f"{found_markers}"
+
+        )
+
+    else:
+
+        print(
+
+            "  Tidak ada penanda error/anti-bot yang dikenal "
+            "di HTML."
+
+        )
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    candidate_classes = set()
+
+    for tag in soup.find_all("a", class_=True):
+
+        for class_name in tag.get("class", []):
+
+            if "chapter" in class_name.lower():
+
+                candidate_classes.add(class_name)
+
+    if candidate_classes:
+
+        print(
+
+            "  Class <a> yang mengandung kata 'chapter': "
+            f"{sorted(candidate_classes)}"
+
+        )
+
+    else:
+
+        print(
+
+            "  Tidak ada elemen <a> dengan class yang "
+            "mengandung kata 'chapter'."
+
+        )
+
+    print("  --- akhir info debug ---")
+
+
+# =========================================================
 # MENGAMBIL SEMUA CHAPTER DARI BAOZI
 #
 # Coba cara cepat (HTML statis) dulu. Kalau chapter list
@@ -470,12 +776,14 @@ def get_chapters(url):
 
     if not chapters:
 
+        debug_html_snapshot(html)
+
         raise Exception(
 
             "Tidak menemukan chapter "
-            "dengan selector "
-            ".comics-chapters__item "
-            "(sudah dicoba mode statis dan JavaScript)"
+            "(sudah dicoba: selector baozimh.com, "
+            "selector baozimh.org, dan elemen #lastchap; "
+            "mode statis maupun JavaScript)"
 
         )
 
