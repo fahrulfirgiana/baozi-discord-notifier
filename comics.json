@@ -15,5 +15,12 @@
     "name": "Urban Dragon Reveal",
     "url": "https://baozimh.org/manga/dushiyinlong",
     "type": "number_from_title"
+  },
+  {
+    "name": "Infinite Evolution Starting from Zero 2",
+    "url": "https://www.dumanwu.com/GGZaZae/",
+    "type": "index_reference",
+    "reference_index": 133,
+    "reference_chapter": 109
   }
 ]
