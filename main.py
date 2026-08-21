@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -5,6 +6,7 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
 
 # =========================================================
@@ -214,25 +216,32 @@ def get_infinite_evolution_chapter_number(
 
 
 # =========================================================
-# MENGAMBIL SEMUA CHAPTER DARI BAOZI
+# USER-AGENT BERSAMA
 # =========================================================
 
-def get_chapters(url):
+USER_AGENT = (
+
+    "Mozilla/5.0 "
+    "(Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 "
+    "(KHTML, like Gecko) "
+    "Chrome/120.0 Safari/537.36"
+
+)
+
+
+# =========================================================
+# MENGAMBIL HTML MENTAH (CARA CEPAT, TANPA JS)
+#
+# Cocok untuk situs yang chapter list-nya di-render
+# server-side (mis. www.baozimh.com).
+# =========================================================
+
+def fetch_html_static(url):
 
     headers = {
-
-        "User-Agent": (
-
-            "Mozilla/5.0 "
-            "(Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
-
-        )
-
+        "User-Agent": USER_AGENT
     }
-
 
     response = requests.get(
 
@@ -244,22 +253,83 @@ def get_chapters(url):
 
     )
 
-
     response.raise_for_status()
 
+    return response.text
 
-    soup = BeautifulSoup(
 
-        response.text,
+# =========================================================
+# MENGAMBIL HTML SETELAH JAVASCRIPT DIJALANKAN
+#
+# Dipakai sebagai fallback ketika chapter list tidak
+# ditemukan di HTML mentah -- biasanya karena situs
+# (mis. baozimh.org) me-load daftar chapter lewat
+# JavaScript/AJAX setelah halaman dibuka, bukan lewat
+# server-side render.
+# =========================================================
 
-        "html.parser"
+async def fetch_html_js_async(url, wait_ms=2000):
+
+    async with async_playwright() as p:
+
+        browser = await p.chromium.launch(
+            headless=True
+        )
+
+        try:
+
+            page = await browser.new_page(
+                user_agent=USER_AGENT
+            )
+
+            await page.goto(
+
+                url,
+
+                timeout=30000,
+
+                wait_until="networkidle"
+
+            )
+
+            # Beri waktu tambahan untuk chapter list
+            # selesai di-load lewat AJAX.
+            await page.wait_for_timeout(wait_ms)
+
+            html = await page.content()
+
+        finally:
+
+            await browser.close()
+
+    return html
+
+
+def fetch_html_js(url, wait_ms=2000):
+
+    return asyncio.run(
+
+        fetch_html_js_async(
+            url,
+            wait_ms=wait_ms
+        )
 
     )
 
 
-    # =====================================================
-    # MENGAMBIL SEMUA CHAPTER
-    # =====================================================
+# =========================================================
+# PARSING HTML -> DAFTAR CHAPTER
+# =========================================================
+
+def parse_chapters(html, url):
+
+    soup = BeautifulSoup(
+
+        html,
+
+        "html.parser"
+
+    )
 
     chapter_items = soup.select(
 
@@ -267,20 +337,7 @@ def get_chapters(url):
 
     )
 
-
-    if not chapter_items:
-
-        raise Exception(
-
-            "Tidak menemukan chapter "
-            "dengan selector "
-            ".comics-chapters__item"
-
-        )
-
-
     chapters = []
-
 
     for position, item in enumerate(
         chapter_items
@@ -377,6 +434,50 @@ def get_chapters(url):
 
         })
 
+
+    return chapters
+
+
+# =========================================================
+# MENGAMBIL SEMUA CHAPTER DARI BAOZI
+#
+# Coba cara cepat (HTML statis) dulu. Kalau chapter list
+# tidak ditemukan (situs JS-rendered seperti baozimh.org),
+# otomatis fallback ke headless browser (Playwright).
+# =========================================================
+
+def get_chapters(url):
+
+    html = fetch_html_static(url)
+
+    chapters = parse_chapters(html, url)
+
+    if chapters:
+
+        return chapters
+
+
+    print(
+
+        "  Chapter list tidak ditemukan di HTML statis, "
+        "mencoba mode JavaScript (Playwright)..."
+
+    )
+
+    html = fetch_html_js(url)
+
+    chapters = parse_chapters(html, url)
+
+    if not chapters:
+
+        raise Exception(
+
+            "Tidak menemukan chapter "
+            "dengan selector "
+            ".comics-chapters__item "
+            "(sudah dicoba mode statis dan JavaScript)"
+
+        )
 
     return chapters
 
