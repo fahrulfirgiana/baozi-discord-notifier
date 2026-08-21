@@ -230,6 +230,88 @@ def get_chapters(url):
     }
 
     # =====================================================
+    # DUMANWU
+    #
+    # Struktur:
+    # <div class="chapterList">
+    #   ...
+    #   <div class="chapterlistload">
+    #     <ul>
+    #       <a href="/GGZaZae/ONJJOGMS.html"><li>勇气可嘉</li></a>
+    #       ...
+    #     </ul>
+    #   </div>
+    # </div>
+    #
+    # Dumanwu menampilkan chapter terbaru di posisi pertama.
+    # Karena judul chapter bisa berupa judul tanpa nomor, URL
+    # chapter dipakai sebagai identitas yang stabil.
+    # =====================================================
+
+    if "dumanwu" in url.lower():
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        chapter_items = soup.select(
+            ".chapterList .chapterlistload ul a[href]"
+        )
+
+        if not chapter_items:
+            # Fallback jika class pembungkus berubah sedikit.
+            chapter_items = soup.select(
+                ".chapterlistload ul a[href]"
+            )
+
+        if not chapter_items:
+            raise Exception(
+                "Tidak menemukan daftar chapter Dumanwu."
+            )
+
+        chapters = []
+
+        for position, item in enumerate(chapter_items):
+
+            chapter_url = item.get("href")
+
+            if chapter_url:
+                chapter_url = urljoin(
+                    url,
+                    chapter_url
+                )
+
+            title = item.get_text(
+                " ",
+                strip=True
+            )
+
+            if not title or not chapter_url:
+                continue
+
+            chapters.append({
+                # Posisi 0 = chapter terbaru pada struktur
+                # Dumanwu yang kamu kirim.
+                "data_index": position,
+                "number": extract_chapter_number(title),
+                "title": title,
+                "url": chapter_url,
+                "source": "dumanwu",
+            })
+
+        if not chapters:
+            raise Exception(
+                "Daftar chapter Dumanwu ditemukan tetapi tidak ada data chapter yang valid."
+            )
+
+        return chapters
+
+    # =====================================================
     # BAOZIMH.ORG
     #
     # Baozi.org tidak menaruh daftar chapter final di HTML.
@@ -374,6 +456,7 @@ def get_chapters(url):
                 "title": title.strip(),
                 "url": chapter_url,
                 "chapter_api_id": str(chapter_id) if chapter_id is not None else None,
+                "source": "baozimh.org",
             })
 
         if not chapters:
@@ -437,6 +520,7 @@ def get_chapters(url):
             "number": chapter_number,
             "title": title,
             "url": chapter_url,
+            "source": "baozimh.com",
         })
 
     return chapters
@@ -454,6 +538,21 @@ def get_latest_chapter(
     if not chapters:
 
         return None
+
+
+    # =====================================================
+    # KHUSUS DUMANWU
+    #
+    # Struktur Dumanwu yang dipakai saat ini menaruh chapter
+    # terbaru di posisi pertama.
+    # =====================================================
+
+    if chapters and chapters[0].get("source") == "dumanwu":
+
+        return min(
+            chapters,
+            key=lambda chapter: chapter["data_index"]
+        )
 
 
     # =====================================================
@@ -559,6 +658,20 @@ def get_chapter_id(
 ):
 
     # =====================================================
+    # KHUSUS DUMANWU
+    #
+    # Dumanwu tidak selalu menampilkan nomor chapter di judul,
+    # jadi URL chapter digunakan sebagai identitas stabil.
+    # =====================================================
+
+    if chapter.get("source") == "dumanwu":
+
+        return (
+            f"url:{chapter['url']}"
+        )
+
+
+    # =====================================================
     # KHUSUS INFINITE EVOLUTION
     #
     # Gunakan data-index.
@@ -646,7 +759,11 @@ def create_state_data(
 
         "chapter_id":
 
-            chapter_id
+            chapter_id,
+
+        "source":
+
+            chapter.get("source")
 
     }
 
