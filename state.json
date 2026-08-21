@@ -4,20 +4,31 @@
     "number": 118,
     "title": "真小氣",
     "url": "https://www.baozimh.com/user/page_direct?comic_id=conglingkaishiwuxianjinhua-taoleqianci&section_slot=0&chapter_slot=118",
-    "chapter_id": "index:142"
+    "chapter_id": "index:142",
+    "source": "baozimh.com"
   },
   "Steel Covenant": {
     "data_index": 104,
     "number": null,
     "title": "078 番外篇( (二） 04",
     "url": "https://www.baozimh.com/user/page_direct?comic_id=gangtieqiyue-lexiangdongman&section_slot=0&chapter_slot=80",
-    "chapter_id": "index:104"
+    "chapter_id": "index:104",
+    "source": "baozimh.com"
   },
   "Urban Dragon Reveal": {
     "data_index": 98,
     "number": 96,
     "title": "第96话 精神病院！",
     "url": "https://baozimh.org/manga/dushiyinlong/32920-6734910-97",
-    "chapter_id": "number:96"
+    "chapter_id": "number:96",
+    "source": "baozimh.org"
+  },
+  "Infinite Evolution Starting from Zero 2": {
+    "data_index": 0,
+    "number": null,
+    "title": "勇气可嘉",
+    "url": "https://www.dumanwu.com/GGZaZae/ONJJOGMS.html",
+    "chapter_id": "url:https://www.dumanwu.com/GGZaZae/ONJJOGMS.html",
+    "source": "dumanwu"
   }
 }
