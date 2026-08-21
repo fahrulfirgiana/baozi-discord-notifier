@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import re
@@ -6,7 +5,6 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 
 
 # =========================================================
@@ -216,233 +214,122 @@ def get_infinite_evolution_chapter_number(
 
 
 # =========================================================
-# USER-AGENT BERSAMA
+# MENGAMBIL SEMUA CHAPTER DARI BAOZI
 # =========================================================
 
-USER_AGENT = (
-
-    "Mozilla/5.0 "
-    "(Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 "
-    "(KHTML, like Gecko) "
-    "Chrome/120.0 Safari/537.36"
-
-)
-
-
-# =========================================================
-# MENGAMBIL HTML MENTAH (CARA CEPAT, TANPA JS)
-#
-# Cocok untuk situs yang chapter list-nya di-render
-# server-side (mis. www.baozimh.com).
-# =========================================================
-
-def fetch_html_static(url):
+def get_chapters(url):
 
     headers = {
-        "User-Agent": USER_AGENT
+
+        "User-Agent": (
+
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+
+        )
+
     }
 
     response = requests.get(
-
         url,
-
         headers=headers,
-
         timeout=30
-
     )
 
     response.raise_for_status()
 
-    return response.text
-
-
-# =========================================================
-# MENGAMBIL HTML SETELAH JAVASCRIPT DIJALANKAN
-#
-# Dipakai sebagai fallback ketika chapter list tidak
-# ditemukan di HTML mentah -- biasanya karena situs
-# (mis. baozimh.org) me-load daftar chapter lewat
-# JavaScript/AJAX setelah halaman dibuka, bukan lewat
-# server-side render.
-# =========================================================
-
-async def fetch_html_js_async(url, wait_ms=3000):
-
-    async with async_playwright() as p:
-
-        browser = await p.chromium.launch(
-
-            headless=True,
-
-            args=[
-
-                # Banyak situs mengecek flag ini untuk
-                # mendeteksi browser yang dikendalikan
-                # otomatisasi (Playwright/Selenium/dll).
-                "--disable-blink-features=AutomationControlled",
-
-            ]
-
-        )
-
-        try:
-
-            context = await browser.new_context(
-
-                user_agent=USER_AGENT,
-
-                viewport={
-
-                    "width": 1366,
-
-                    "height": 900
-
-                },
-
-                locale="zh-TW"
-
-            )
-
-            # Sembunyikan navigator.webdriver, penanda paling
-            # umum dipakai situs untuk mendeteksi headless
-            # browser otomatis.
-            await context.add_init_script(
-
-                "Object.defineProperty(navigator, "
-                "'webdriver', {get: () => undefined});"
-
-            )
-
-            page = await context.new_page()
-
-            await page.goto(
-
-                url,
-
-                timeout=30000,
-
-                # domcontentloaded lebih aman daripada
-                # networkidle -- beberapa situs punya koneksi
-                # latar belakang (analytics/ads) yang membuat
-                # networkidle tidak pernah tercapai.
-                wait_until="domcontentloaded"
-
-            )
-
-            # Tunggu spesifik sampai chapter list muncul di DOM
-            try:
-
-                await page.wait_for_selector(
-
-                    "a.comics-chapters__item",
-
-                    timeout=15000
-
-                )
-
-            except Exception:
-
-                # Selector tidak muncul dalam waktu tunggu --
-                # lanjut saja, biar tetap diambil HTML apa
-                # adanya untuk keperluan debug.
-                pass
-
-            # Beri waktu tambahan jaga-jaga untuk AJAX susulan.
-            await page.wait_for_timeout(wait_ms)
-
-            html = await page.content()
-
-        finally:
-
-            await browser.close()
-
-    return html
-
-
-def fetch_html_js(url, wait_ms=2000):
-
-    return asyncio.run(
-
-        fetch_html_js_async(
-            url,
-            wait_ms=wait_ms
-        )
-
-    )
-
-
-# =========================================================
-# PARSING HTML -> DAFTAR CHAPTER
-#
-# Situs "baozi" ternyata punya 2 platform/struktur HTML yang
-# beda total tergantung domain:
-#
-# 1. www.baozimh.com (Vue) -> <a class="comics-chapters__item">
-# 2. baozimh.org (Astro + Alpine.js) -> <div class="chapteritem">
-#    dengan data-ct = judul chapter, atau fallback ke elemen
-#    #lastchap (chapter terbaru saja, tersedia tanpa JS).
-#
-# Dicoba berurutan; yang pertama ketemu isinya dipakai.
-# =========================================================
-
-def parse_chapters(html, url):
-
     soup = BeautifulSoup(
-
-        html,
-
+        response.text,
         "html.parser"
-
     )
 
-    chapters = parse_chapters_style_baozimh_com(soup, url)
+    # =====================================================
+    # BAOZIMH.COM
+    #
+    # Struktur lama:
+    # a.comics-chapters__item
+    # =====================================================
 
-    if chapters:
+    if "baozimh.com" in url:
 
-        return chapters
+        chapter_items = soup.select(
+            "a.comics-chapters__item"
+        )
 
-    chapters = parse_chapters_style_baozimh_org(soup, url)
+    # =====================================================
+    # BAOZIMH.ORG
+    #
+    # Struktur baru:
+    #
+    # <div class="chapteritem" data-index="0">
+    #   <a href="..." data-ms="..." data-cs="..."
+    #      data-ct="第96话 ...">
+    # =====================================================
 
-    if chapters:
+    elif "baozimh.org" in url:
 
-        return chapters
+        chapter_items = soup.select(
+            "#mangachapters .chapteritem > a"
+        )
 
-    return parse_latest_chapter_lastchap(soup, url)
+        # Fallback jika struktur ID berubah
+        if not chapter_items:
+            chapter_items = soup.select(
+                ".chapteritem > a"
+            )
 
+    else:
 
-# =========================================================
-# STRUKTUR 1: www.baozimh.com (Vue)
-#
-# <a class="comics-chapters__item" data-index="..." href="...">
-#   judul chapter
-# </a>
-# =========================================================
+        # Coba struktur .com terlebih dahulu,
+        # lalu struktur .org.
+        chapter_items = soup.select(
+            "a.comics-chapters__item"
+        )
 
-def parse_chapters_style_baozimh_com(soup, url):
+        if not chapter_items:
+            chapter_items = soup.select(
+                "#mangachapters .chapteritem > a"
+            )
 
-    chapter_items = soup.select(
+    if not chapter_items:
 
-        "a.comics-chapters__item"
-
-    )
+        raise Exception(
+            "Tidak menemukan chapter. "
+            "Selector Baozi.com maupun Baozi.org "
+            "tidak cocok dengan halaman."
+        )
 
     chapters = []
 
-    for position, item in enumerate(
-        chapter_items
-    ):
-
+    for position, item in enumerate(chapter_items):
 
         # =================================================
-        # MENGAMBIL DATA-INDEX
+        # DATA-INDEX
+        #
+        # Baozi.com:
+        # biasanya berada langsung pada <a>
+        #
+        # Baozi.org:
+        # berada pada parent .chapteritem
         # =================================================
 
         data_index = item.get(
             "data-index"
         )
 
+        if data_index is None:
+
+            parent = item.find_parent(
+                class_="chapteritem"
+            )
+
+            if parent:
+                data_index = parent.get(
+                    "data-index"
+                )
 
         if data_index is not None:
 
@@ -452,7 +339,7 @@ def parse_chapters_style_baozimh_com(soup, url):
                     data_index
                 )
 
-            except ValueError:
+            except (ValueError, TypeError):
 
                 data_index = position
 
@@ -460,42 +347,55 @@ def parse_chapters_style_baozimh_com(soup, url):
 
             data_index = position
 
-
         # =================================================
-        # MENGAMBIL JUDUL CHAPTER
+        # JUDUL CHAPTER
+        #
+        # Baozi.org menyediakan data-ct:
+        # 第96话 精神病院！
+        #
+        # Lebih aman daripada hanya mengambil
+        # text node dari seluruh elemen.
         # =================================================
 
-        title = item.get_text(
-            " ",
-            strip=True
+        title = item.get(
+            "data-ct"
         )
 
+        if not title:
 
-        # =================================================
-        # MENGAMBIL NOMOR CHAPTER
-        #
-        # Urban Dragon:
-        # nomor dibaca dari judul.
-        #
-        # Infinite Evolution:
-        # nomor dihitung khusus nanti.
-        # =================================================
-
-        chapter_number = (
-            extract_chapter_number(
-                title
+            title_element = item.select_one(
+                ".chaptertitle"
             )
-        )
 
+            if title_element:
+
+                title = title_element.get_text(
+                    " ",
+                    strip=True
+                )
+
+            else:
+
+                title = item.get_text(
+                    " ",
+                    strip=True
+                )
 
         # =================================================
-        # MENGAMBIL URL CHAPTER
+        # NOMOR CHAPTER
+        # =================================================
+
+        chapter_number = extract_chapter_number(
+            title
+        )
+
+        # =================================================
+        # URL CHAPTER
         # =================================================
 
         chapter_url = item.get(
             "href"
         )
-
 
         if chapter_url:
 
@@ -504,9 +404,8 @@ def parse_chapters_style_baozimh_com(soup, url):
                 chapter_url
             )
 
-
         # =================================================
-        # MENYIMPAN DATA CHAPTER
+        # SIMPAN DATA
         # =================================================
 
         chapters.append({
@@ -524,268 +423,6 @@ def parse_chapters_style_baozimh_com(soup, url):
                 chapter_url
 
         })
-
-
-    return chapters
-
-
-# =========================================================
-# STRUKTUR 2: baozimh.org (Astro + Alpine.js)
-#
-# <div class="chapteritem" data-index="...">
-#   <a href="..." data-ct="judul chapter">...</a>
-# </div>
-#
-# Judul chapter langsung tersedia di atribut data-ct, jadi
-# tidak perlu ambil dari teks elemen.
-#
-# Catatan: bagian ini biasanya baru terisi setelah Alpine.js
-# jalan (mode JavaScript/Playwright), karena di-render lewat
-# x-html.
-# =========================================================
-
-def parse_chapters_style_baozimh_org(soup, url):
-
-    items = soup.select(
-
-        "div.chapteritem"
-
-    )
-
-    chapters = []
-
-    seen_urls = set()
-
-    for position, div in enumerate(
-        items
-    ):
-
-        link = div.find("a")
-
-        if link is None:
-
-            continue
-
-        href = link.get("href")
-
-        if not href:
-
-            continue
-
-        chapter_url = urljoin(
-            url,
-            href
-        )
-
-        # Hindari duplikat -- situs ini menampilkan 2 daftar
-        # terpisah (terbaru & terlama) yang bisa saja
-        # tumpang tindih.
-        if chapter_url in seen_urls:
-
-            continue
-
-        seen_urls.add(chapter_url)
-
-        data_index = div.get("data-index")
-
-        try:
-
-            data_index = int(data_index)
-
-        except (TypeError, ValueError):
-
-            data_index = position
-
-        title = (
-
-            link.get("data-ct")
-            or link.get_text(" ", strip=True)
-
-        )
-
-        chapter_number = extract_chapter_number(title)
-
-        chapters.append({
-
-            "data_index": data_index,
-
-            "number": chapter_number,
-
-            "title": title,
-
-            "url": chapter_url
-
-        })
-
-    return chapters
-
-
-# =========================================================
-# STRUKTUR 3 (FALLBACK): elemen #lastchap
-#
-# <a id="lastchap" href="...">judul chapter terbaru</a>
-#
-# Cuma kasih 1 chapter (yang terbaru), tapi cukup untuk
-# keperluan notifikasi update. Elemen ini biasanya tersedia
-# di baozimh.org bahkan tanpa menjalankan JavaScript.
-# =========================================================
-
-def parse_latest_chapter_lastchap(soup, url):
-
-    tag = soup.find(id="lastchap")
-
-    if tag is None:
-
-        return []
-
-    href = tag.get("href")
-
-    if not href:
-
-        return []
-
-    chapter_url = urljoin(url, href)
-
-    title = tag.get_text(" ", strip=True)
-
-    chapter_number = extract_chapter_number(title)
-
-    return [{
-
-        "data_index": 0,
-
-        "number": chapter_number,
-
-        "title": title,
-
-        "url": chapter_url
-
-    }]
-
-
-# =========================================================
-# DEBUG: TELUSURI PENYEBAB SELECTOR TIDAK KETEMU
-#
-# Dipanggil hanya saat mode statis maupun JavaScript
-# sama-sama gagal menemukan chapter list. Tidak mengubah
-# behavior, cuma mencetak info tambahan ke log Actions
-# supaya penyebabnya bisa dipastikan (situs berubah struktur,
-# atau situsnya sendiri gagal load data / diblokir anti-bot).
-# =========================================================
-
-def debug_html_snapshot(html):
-
-    print("  --- DEBUG: info cuplikan HTML ---")
-
-    print(f"  Panjang HTML: {len(html)} karakter")
-
-    error_markers = [
-        "获取数据失败",
-        "获取数据失敗",
-        "Just a moment",
-        "Attention Required",
-        "captcha",
-    ]
-
-    found_markers = [
-        marker
-        for marker in error_markers
-        if marker.lower() in html.lower()
-    ]
-
-    if found_markers:
-
-        print(
-
-            "  Terdeteksi penanda gagal/anti-bot di HTML: "
-            f"{found_markers}"
-
-        )
-
-    else:
-
-        print(
-
-            "  Tidak ada penanda error/anti-bot yang dikenal "
-            "di HTML."
-
-        )
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    candidate_classes = set()
-
-    for tag in soup.find_all("a", class_=True):
-
-        for class_name in tag.get("class", []):
-
-            if "chapter" in class_name.lower():
-
-                candidate_classes.add(class_name)
-
-    if candidate_classes:
-
-        print(
-
-            "  Class <a> yang mengandung kata 'chapter': "
-            f"{sorted(candidate_classes)}"
-
-        )
-
-    else:
-
-        print(
-
-            "  Tidak ada elemen <a> dengan class yang "
-            "mengandung kata 'chapter'."
-
-        )
-
-    print("  --- akhir info debug ---")
-
-
-# =========================================================
-# MENGAMBIL SEMUA CHAPTER DARI BAOZI
-#
-# Coba cara cepat (HTML statis) dulu. Kalau chapter list
-# tidak ditemukan (situs JS-rendered seperti baozimh.org),
-# otomatis fallback ke headless browser (Playwright).
-# =========================================================
-
-def get_chapters(url):
-
-    html = fetch_html_static(url)
-
-    chapters = parse_chapters(html, url)
-
-    if chapters:
-
-        return chapters
-
-
-    print(
-
-        "  Chapter list tidak ditemukan di HTML statis, "
-        "mencoba mode JavaScript (Playwright)..."
-
-    )
-
-    html = fetch_html_js(url)
-
-    chapters = parse_chapters(html, url)
-
-    if not chapters:
-
-        debug_html_snapshot(html)
-
-        raise Exception(
-
-            "Tidak menemukan chapter "
-            "(sudah dicoba: selector baozimh.com, "
-            "selector baozimh.org, dan elemen #lastchap; "
-            "mode statis maupun JavaScript)"
-
-        )
 
     return chapters
 
@@ -1188,10 +825,19 @@ def main():
         )
 
 
+        source_name = (
+            "Baozi.org"
+            if "baozimh.org" in comic_url
+            else "Baozi.com"
+            if "baozimh.com" in comic_url
+            else "Baozi"
+        )
+
         print(
 
             f"Mengecek: "
-            f"{comic_name}"
+            f"{comic_name} "
+            f"[{source_name}]"
 
         )
 
